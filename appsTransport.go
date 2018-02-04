@@ -1,6 +1,7 @@
 package ghinstallation
 
 import (
+	"context"
 	"crypto/rsa"
 	"fmt"
 	"io/ioutil"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	jwt "github.com/dgrijalva/jwt-go"
+	"golang.org/x/net/context/ctxhttp"
 )
 
 // AppsTransport provides a http.RoundTripper by wrapping an existing
@@ -25,15 +27,16 @@ type AppsTransport struct {
 	tr            http.RoundTripper // tr is the underlying roundtripper being wrapped
 	key           *rsa.PrivateKey   // key is the GitHub Integration's private key
 	integrationID int               // integrationID is the GitHub Integration's Installation ID
+	ctx           context.Context
 }
 
 // NewAppsTransportKeyFromFile returns a AppsTransport using a private key from file.
-func NewAppsTransportKeyFromFile(tr http.RoundTripper, integrationID int, privateKeyFile string) (*AppsTransport, error) {
+func NewAppsTransportKeyFromFile(ctx context.Context, tr http.RoundTripper, integrationID int, privateKeyFile string) (*AppsTransport, error) {
 	privateKey, err := ioutil.ReadFile(privateKeyFile)
 	if err != nil {
 		return nil, fmt.Errorf("could not read private key: %s", err)
 	}
-	return NewAppsTransport(tr, integrationID, privateKey)
+	return NewAppsTransport(ctx, tr, integrationID, privateKey)
 }
 
 // NewAppsTransport returns a AppsTransport using private key. The key is parsed
@@ -43,12 +46,13 @@ func NewAppsTransportKeyFromFile(tr http.RoundTripper, integrationID int, privat
 // installations to ensure reuse of underlying TCP connections.
 //
 // The returned Transport's RoundTrip method is safe to be used concurrently.
-func NewAppsTransport(tr http.RoundTripper, integrationID int, privateKey []byte) (*AppsTransport, error) {
+func NewAppsTransport(ctx context.Context, tr http.RoundTripper, integrationID int, privateKey []byte) (*AppsTransport, error) {
 	t := &AppsTransport{
 		tr:            tr,
 		integrationID: integrationID,
 		BaseURL:       apiBaseURL,
 		Client:        &http.Client{Transport: tr},
+		ctx:           ctx,
 	}
 	var err error
 	t.key, err = jwt.ParseRSAPrivateKeyFromPEM(privateKey)
@@ -75,6 +79,7 @@ func (t *AppsTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	req.Header.Set("Authorization", "Bearer "+ss)
 	req.Header.Set("Accept", acceptHeader)
 
-	resp, err := t.tr.RoundTrip(req)
+	c := t.Client.(*http.Client)
+	resp, err := ctxhttp.Do(t.ctx, c, req)
 	return resp, err
 }

@@ -1,6 +1,7 @@
 package ghinstallation
 
 import (
+	"context"
 	"io/ioutil"
 	"net/http"
 	"os"
@@ -21,7 +22,7 @@ func TestNewAppsTransportKeyFromFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err = NewAppsTransportKeyFromFile(&http.Transport{}, integrationID, tmpfile.Name())
+	_, err = NewAppsTransportKeyFromFile(context.Background(), &http.Transport{}, integrationID, tmpfile.Name())
 	if err != nil {
 		t.Fatal("unexpected error:", err)
 	}

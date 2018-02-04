@@ -1,12 +1,15 @@
 package ghinstallation
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"net/http"
 	"sync"
 	"time"
+
+	"golang.org/x/net/context/ctxhttp"
 )
 
 const (
@@ -33,6 +36,7 @@ type Transport struct {
 
 	mu    *sync.Mutex  // mu protects token
 	token *accessToken // token is the installation's access token
+	ctx   context.Context
 }
 
 // accessToken is an installation access token response from GitHub
@@ -44,12 +48,12 @@ type accessToken struct {
 var _ http.RoundTripper = &Transport{}
 
 // NewKeyFromFile returns a Transport using a private key from file.
-func NewKeyFromFile(tr http.RoundTripper, integrationID, installationID int, privateKeyFile string) (*Transport, error) {
+func NewKeyFromFile(ctx context.Context, tr http.RoundTripper, integrationID, installationID int, privateKeyFile string) (*Transport, error) {
 	privateKey, err := ioutil.ReadFile(privateKeyFile)
 	if err != nil {
 		return nil, fmt.Errorf("could not read private key: %s", err)
 	}
-	return New(tr, integrationID, installationID, privateKey)
+	return New(ctx, tr, integrationID, installationID, privateKey)
 }
 
 // Client is a HTTP client which sends a http.Request and returns a http.Response
@@ -65,7 +69,7 @@ type Client interface {
 // installations to ensure reuse of underlying TCP connections.
 //
 // The returned Transport's RoundTrip method is safe to be used concurrently.
-func New(tr http.RoundTripper, integrationID, installationID int, privateKey []byte) (*Transport, error) {
+func New(ctx context.Context, tr http.RoundTripper, integrationID, installationID int, privateKey []byte) (*Transport, error) {
 	t := &Transport{
 		tr:             tr,
 		integrationID:  integrationID,
@@ -73,9 +77,10 @@ func New(tr http.RoundTripper, integrationID, installationID int, privateKey []b
 		BaseURL:        apiBaseURL,
 		Client:         &http.Client{Transport: tr},
 		mu:             &sync.Mutex{},
+		ctx:            ctx,
 	}
 	var err error
-	t.appsTransport, err = NewAppsTransport(t.tr, t.integrationID, privateKey)
+	t.appsTransport, err = NewAppsTransport(ctx, t.tr, t.integrationID, privateKey)
 	if err != nil {
 		return nil, err
 	}
@@ -91,7 +96,9 @@ func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 
 	req.Header.Set("Authorization", "token "+token)
 	req.Header.Add("Accept", acceptHeader) // We add to "Accept" header to avoid overwriting existing req headers.
-	resp, err := t.tr.RoundTrip(req)
+
+	c := t.Client.(*http.Client)
+	resp, err := ctxhttp.Do(t.ctx, c, req)
 	return resp, err
 }
 
